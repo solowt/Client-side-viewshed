@@ -5,9 +5,11 @@ define('ClientVS', [
 	"esri/geometry/support/webMercatorUtils",
 	"esri/geometry/Circle",
 	"esri/geometry/Polyline",
-	"esri/geometry/Polygon"
+	"esri/geometry/Polygon",
+	"esri/symbols/SimpleMarkerSymbol",
+	"esri/Graphic"
 ],
-function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon ) {
+function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon, SMS, G) {
 	return declare(null, {
 	    constructor: function(view){
 	      if (!view){
@@ -405,16 +407,16 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon ) {
 		          		rings.push(newRing);
 		        	}
 		        }
-		        // this.evenOddCheck(rings);
-		        rings.sort((a,b) => {
-		            if (a.points.length > b.points.length){
-		              return -1;
-		            } else if (a.points.length < b.points.length){
-		              return 1;
-		            } else {
-		              return 0;
-		            }
-	        	});
+		        this.evenOddCheck(rings, raster);
+		        // rings.sort((a,b) => {
+		        //     if (a.points.length > b.points.length){
+		        //       return -1;
+		        //     } else if (a.points.length < b.points.length){
+		        //       return 1;
+		        //     } else {
+		        //       return 0;
+		        //     }
+	        	// });
 		        // console.log(rings);
 		      	rings.forEach(ring => ring.points = this.ringToMap(ring.points,raster));
 		    	resolve(rings);
@@ -423,32 +425,52 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon ) {
 
 		// to see if a given ring should be hollow (which means we reverse it)
 		// https://en.wikipedia.org/wiki/Even%E2%80%93odd_rule
-		evenOddCheck: function(rings){
+		evenOddCheck: function(rings, raster){
 			rings.forEach((ring,idx) => {
 				let intersections = 0;
 				let x = ring.xMin;
 				let y = ring.yAtXmin;
+				
+				
 				while (x > 0){
 					for (let j = 0; j < rings.length; j++){
-						if (j !== idx && 
-							(ring.xMin >= rings[j].xMin &&
-						    ring.xMax <= rings[j].xMax &&
-						    ring.yMin >= rings[j].yMin &&
-						    ring.yMax <= rings[j].yMax))
-						{
-							pointInPath = false;
-							let l = rings[j].points.length - 1;
-							for (let k = 0; k < rings[j].points.length; k++){
-								let points = rings[j].points;
-								// console.log('x: '+x)
-								// console.log((points[l][0] - points[k][0]) * (y - points[k][1]) / points[l][1] - points[k][1]) + points[k][0];
+						if (j !== idx && (
+							x >= rings[j].xMin &&
+							x <= rings[j].xMax &&
+							y >= rings[j].yMin &&
+							y <= rings[j].yMax)) {
+
+							let points = rings[j].points;
+							let l = points.length - 1;
+							for (let k = 0; k < points.length; k++){
+								// console.log(rings[k][0],rings[l][0])
+								// (x < ((points[l][0] - points[k][0]) * (y - points[k][1]) / (points[l][1] - points[k][1]) + points[k][0]))
+								// ((points[k][0] > x) !== (points[l][0] > x))
 								if (((points[k][1] > y) !== (points[l][1] > y)) &&
-									(x < (points[l][0] - points[k][0]) * (y - points[k][1]) / points[l][1] - points[k][1]) + points[k][0]){
-									pointInPath = !pointInPath;	
+									((points[k][0] === x) || (points[l][0] === x))){
+									let [lng,lat] = this.pointToLngLat([x,y],raster);
+									let g = new G({
+										geometry: new Point({
+											x: lng,
+											y: lat,
+											spatialReference: {wkid: 3857}
+										}),
+										symbol: new SMS({
+										  style: "square",
+										  color: "blue",
+										  size: "8px",  // pixels
+										  outline: {  // autocasts as esri/symbols/SimpleLineSymbol
+										    color: [ 255, 255, 0 ],
+										    width: 3  // points
+										  }
+										})
+									});
+									this.view.graphics.add(g);
+									intersections++;
+									// continue;
 								}
 								l = k;
 							}
-							if (pointInPath) intersections++;
 						}
 					}
 					x--;
