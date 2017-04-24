@@ -169,7 +169,7 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon, SM
 		        	this.flipLine(resultLine,raster);
 		      	});
 
-		      	this.traceResult(raster, 2).then((rings)=>{
+		      	this.traceResult(raster, 0).then((rings)=>{
 		        	resolve(rings);
 		      	});
 		    });
@@ -420,7 +420,7 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon, SM
 	        	// });
 		        
 		        // reverse rings that are inside and count "children" rings that each ring contains
-		        this.evenOddCheck(rings, raster);
+		        this.evenOddCheck(rings);
 		        
 		        // sort array again by children, parents must come before children or
 		        // array will not be drawn properly
@@ -440,7 +440,19 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon, SM
     		Array.prototype.splice.apply(array, [index, 0].concat(arrayToInsert));
 		},
 
-		// BFS
+		/**
+		* getChildren - simple BFS
+		*
+		* @param {ring} ring that has children
+		* @param {rings} array of all rings
+		*
+		* this method orders all the rings that are children of the passed in ring.
+		* assuming ring (1) has 3 children (2,3,4) and child 3 has 2 children (5,6)
+		* this will return [ring 1, ring 2, ring 3, ring 5, ring 6, ring 4]
+		*
+		* this is necessary because of unpolished polygon drawing rules in 3D the JS API 
+		*/
+
 		getChildren(ring, rings){
 			let retArray = [ring];
 			let queue = [ring];
@@ -459,9 +471,20 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon, SM
 			return retArray;
 		},
 
-		// to see if a given ring should be a hole or a fill (which means we reverse it)
-		// https://en.wikipedia.org/wiki/Even%E2%80%93odd_rule
-		evenOddCheck: function(rings, raster){
+		/** 
+		* evenOddCheck - simple implementation of the even-odd rule: https://en.wikipedia.org/wiki/Even%E2%80%93odd_rule
+		*
+		* the basic idea is that if you draw a line starting at the edge of each ring in any direction
+		* the number of times it crosses other rings tells us whether the polygon should be a hole or a 
+		* fill.  if it crosses an even number of times, it's filled, odd number, a hole
+		*
+		* this method also attaches parent and child arrays to each ring
+		* 
+		* @param {rings} - all rings
+		* @param {raster} - all data
+		*/
+
+		evenOddCheck: function(rings){
 			rings.forEach((ring,idx) => {
 				let intersections = 0; // total intersections with other rings
 
@@ -484,32 +507,11 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon, SM
 							let l = points.length - 1; // check the current point in the ring against the previous to see if it crossed the ring
 
 							for (let k = 0; k < points.length; k++){
-								// console.log(rings[k][0],rings[l][0])
-								// (x < ((points[l][0] - points[k][0]) * (y - points[k][1]) / (points[l][1] - points[k][1]) + points[k][0]))
-								// ((points[k][0] > x) !== (points[l][0] > x))
 								if (((points[k][1] > y) !== (points[l][1] > y)) &&
 									((points[k][0] === x) || (points[l][0] === x))){
-									// let [lng,lat] = this.pointToLngLat([x,y],raster);
-									// let g = new G({
-									// 	geometry: new Point({
-									// 		x: lng,
-									// 		y: lat,
-									// 		spatialReference: {wkid: 3857}
-									// 	}),
-									// 	symbol: new SMS({
-									// 	  style: "square",
-									// 	  color: "blue",
-									// 	  size: "8px",  // pixels
-									// 	  outline: {  // autocasts as esri/symbols/SimpleLineSymbol
-									// 	    color: [ 255, 255, 0 ],
-									// 	    width: 3  // points
-									// 	  }
-									// 	})
-									// });
-									// this.view.graphics.add(g);
+									
 									intersections += 1;
 									intersectionMap[rings[j].id] += 1;
-									// continue;
 								}
 								l = k;
 							}
