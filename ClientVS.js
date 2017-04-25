@@ -17,61 +17,87 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon, SM
 	      }
 	      this.view = view;
 	    },
+
+	    EARTH_DIAM: 12740000, // diameter of earth in meters,
+
 	    /**
-	  	*
-	  	* @param: {point} esriPoint - center of vs
-		* @param: {radius} number - radius of vs (meters)
-		* @param {resolution} number - width/height of pixel in meters, determines resolution of viewshed
-		* options: {inputGeometry: any, radius: number, pixelWidth: number, observerHeight: number, objectHeight: number}
+	  	* doClientVS - call this to do a viewshed
+	  	  @param: {options} - contains the following properties:
+	  	* 	{esriPoint} - inputGeometry - observer's location, the center of the viewshed
+		* 	{number} - radius - radius of viewshed in meters
+		*   {number} - pixelWidth - width/height of pixel in meters, determines resolution of viewshed. lower is more accurate but slower
+		* 	{number} - observerHeight - height of observer above terrain in meters
+		*   {number} - objectHeight - height of thing being observed in meters
+		*
+		* @returns {Promise} -> resolves to a polygon geometry
 		*/
 		doClientVS(options){
 		    return new Promise((fulfill, reject) => {
+
+		    	// defaults
 		  	    let point = options.inputGeometry.spatialReference.isWGS84 ? wmUtils.geographicToWebMercator(options.inputGeometry) : options.inputGeometry,
 			        radius = options.radius || 5000,
-			        resolution = options.pixelWidth || 10,
+			        resolution = options.pixelWidth || 20,
 			        subjectHeight = options.observerHeight || 2,
-			        objectHeight = options.objectHeight;
+			        objectHeight = options.objectHeight || 0;
 
 			    // create a circle based on radius and center
 			    let circle = this.buildCircle([point.longitude, point.latitude], radius);
 			    
-			    //
+			    // create the bounds.  you can think of this as the x axis, y axis, top, and bottom of the raster
+			    // these are just polylines densified by the input resolution
 			    this.buildBounds(circle, resolution).then(bounds => {
 			    	let xAxis = bounds.x.paths[0];
 			        let yAxis = bounds.y.paths[0];
 			        let top = bounds.top.paths[0];
 			        let right = bounds.right.paths[0];
 
+			        // this will hold all the elevation values
 			        let elevationRaster = new Array(xAxis.length * yAxis.length).fill(null);
 
 			        let raster = {
 			            view: this.view,
-			            pixels: new Array(xAxis.length * yAxis.length).fill(false),
+			            pixels: new Array(xAxis.length * yAxis.length).fill(false), // visibility raster, start everything as false
 			            circle: circle,
 			            xAxis: xAxis,
 			            yAxis: yAxis,
 			            top: top,
 			            right: right,
-			            pixelsLength: xAxis.length * yAxis.length,
-			            pixelsWidth: xAxis.length,
-			            pixelsCenter: [Math.floor(xAxis.length/2),Math.floor(yAxis.length/2)],
-			            geoPointCenter: [xAxis[Math.floor(xAxis.length/2)][0],yAxis[Math.floor(yAxis.length/2)][1]],
+			            pixelsLength: xAxis.length * yAxis.length, // total number of pixels
+			            pixelsWidth: xAxis.length, // width of raster
+			            pixelsCenter: [Math.floor(xAxis.length/2),Math.floor(yAxis.length/2)], // center of pixels in [X,Y] form
+			            geoPointCenter: [xAxis[Math.floor(xAxis.length/2)][0],yAxis[Math.floor(yAxis.length/2)][1]], // center of pixels in map space
 			            subjectHeight: subjectHeight,
-			            objectHeight: objectHeight
+			            objectHeight: objectHeight, 
+			            resolution: resolution
 			        }
 
-			        // fetch all the needed elevations from the basemapterrain
+			        // fetch all the needed elevations from the basemapTerrain
 			        elevationRaster = elevationRaster.map((cell, index) => {
-				        let geoPoint = this.indexToGeoPoint(index, raster);
-				        return this.geoPointToElevation(wmUtils.webMercatorToGeographic(geoPoint), this.view);
+			        	let point = this.indexToPoint(index, raster.pixelsWidth); // the point whose elevation is being fetched
+			        	let distance = this.distance(point, raster.pixelsCenter); // distance to observer in raster space
+					    let geoPoint = this.indexToGeoPoint(index, raster); // map space point for the point
+
+			        	// if index being checked is raster center
+			        	if (distance === 0){
+			        		// just get elevation + observer height.  store on raster because we need to calculate this a lot
+			        		raster.centerElevation = this.view.basemapTerrain.getElevation(wmUtils.webMercatorToGeographic(geoPoint)) + raster.subjectHeight;
+			        		return raster.centerElevation;
+			        	} else {
+			        		// get elevation + observed height with earth's curve accounted for
+					        return this.geoPointToElevation(wmUtils.webMercatorToGeographic(geoPoint), this.view, distance, raster);
+			        	}
 			        });
 
 			        raster.elevationRaster = elevationRaster;
 
+			        // now that we have the raster filled in, do the actual computation
 			        this.computeViewshed(raster).then(result => {
-			          
+			          	
+			          	// the rings are returned by the computation
 			        	let rings = result.map((r)=>r.points);
 
+			        	// fulfill the polygon geometry
 			        	fulfill(new Polygon({
 			            	rings: rings,
 			            	spatialReference: { wkid: 3857 }
@@ -93,6 +119,8 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon, SM
 		    });
 		},
 
+		// get the X, Y, top, and bottom polylines.
+		// these are just the edges of the circle's extent densified at the user input resolution
 		buildBounds: function(circle, resolution){
 		    let lineArray = [];
 
@@ -156,26 +184,51 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon, SM
 		    });
 		},
 		
+		// do the actual computation
 		computeViewshed: function(raster){
 		    let circleRadius = Math.min(raster.pixelsCenter[0],raster.pixelsCenter[1]) - 1;
+
+		    // rasterize a circle.  we have the circle in map space, but we need it in raster space
 		    let circle = this.drawCircle(raster.pixelsCenter, circleRadius);
 
 
+		    // for each raster [x,y] point in the circle, do a line check
+		    // this involves checking the line from the center of the circle to the edge and 
+		    // walking along it
 		    return new Promise((resolve,reject)=>{
-		    	// let square = left.concat(top,right,bottom);
+
 		    	circle.forEach((point)=>{
 			        let line = this.drawLine(raster.pixelsCenter,point);
 			        let resultLine = this.testLine(line,raster);
-		        	this.flipLine(resultLine,raster);
+		        	this.flipLine(resultLine,raster); // for pixels in the line that can be seen, change them to true
 		      	});
 
+		    	// once the raster is complete, we need to trace the edges of the visibile areas to get the rings
+		    	// of the resulting polygon
 		      	this.traceResult(raster, 0).then((rings)=>{
 		        	resolve(rings);
 		      	});
 		    });
 		},
+
+	    /**
+	    * earthCurvOffset
+	    * given elevation at a point, distance in raster space, and resolution (width/height of raster cell)
+	    * return the correct offset based on the earth's elevation
+	    *
+	    * @param {number} - resolution -width of raster cell in meters
+	    * @param {number} - distance - distance between observer and point in raster units  
+	    * @param {number} - baseElevation - the elevation of the prior to this correction
+		*
+		* @returns {number} - correct elevation of the point
+	    */
+
+        earthCurveOffset(resolution, distance, baseElevation){
+			return baseElevation - (.87 * (Math.pow((distance * resolution), 2) / this.EARTH_DIAM));
+  		},
 		
-		// count up result pixels to see how many can be seen and how many can't
+		// count up result pixels to see how many can be seen and how many can't.
+		// this is just a testing method
 		countPixels: function(pixels){
     		let numTrue = 0;
    			let numFalse = 0;
@@ -193,6 +246,7 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon, SM
 			}
   		},
 
+  		// go from raster space [x,y] to array space. remember the raster is a 1D array
   		pointToIndex: function(point,width,length){
 		    let idx = point[1] * width + point[0];
 		    
@@ -203,17 +257,20 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon, SM
 		    }
 		},
 
+		// go from array space to raster space [x,y] 
 		indexToPoint: function(idx,width){
 		    const x = idx % width;
 		    const y = (idx - x) / width;
 		    return([x,y]);
 		},
 
+		// go from array space to map space
   		indexToGeoPoint: function(idx,raster){
 		    let point = this.indexToPoint(idx,raster.pixelsWidth);
 		    return this.pointToGeoPoint(point,raster);
   		},
 
+  		// go from raster space to map space
   		pointToGeoPoint: function(point,raster){
     		return new Point({
 		      	longitude: raster.xAxis[point[0]][0],
@@ -222,6 +279,7 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon, SM
 		    });
   		},
 
+  		// given an [x,y] point, return a [lng,lat] (map space)
   		pointToLngLat: function(point,raster){
     		return [
 			    raster.xAxis[point[0]][0],
@@ -229,11 +287,16 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon, SM
     		]
   		},
 
-  		geoPointToElevation: function(point, view){
-		    let height = view.basemapTerrain.getElevation(point);
-		    return height;
+  		// given a point, the distance (in raster space) and some other stuff, return an elevation.
+  		// this takes the earth's curvature into account.
+  		geoPointToElevation: function(point, view, distance, raster){
+		    let baseElevation = view.basemapTerrain.getElevation(point) + raster.objectHeight;
+		    let realElevation = this.earthCurveOffset(raster.resolution, distance, baseElevation);
+
+		    return realElevation;
   		},
 
+  		// does a look up in the already-built elevation raster
   		pointToElevation: function(point,raster){
 		    let idx = this.pointToIndex(point, raster.pixelsWidth, raster.pixelsLength);
 		    return raster.elevationRaster[idx];
@@ -241,6 +304,7 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon, SM
 		    // return geoPointToElevation(geoPoint,raster.view);
 		},
 
+		// disrance formula for raster
 		distance: function(point1,point2){
     		return Math.sqrt( (Math.pow(point2[0] - point1[0], 2)) + (Math.pow(point2[1] - point1[1], 2)) );
   		},
@@ -291,7 +355,7 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon, SM
   		},
 
 		// draw a circle given a center and radius in raster space
-	  	// angle for later to only computer viewshed for some angle
+		// keep octants separate so this will be in a continuous order
 		drawCircle: function(center,radius, angle){
 			let circle = [],
         		x = radius,
@@ -339,9 +403,10 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon, SM
 
 	  	},
 
+	  	// slope formula
   		slope: function(point1, point2, raster){
-		    let h1 = this.pointToElevation(point1,raster) + raster.subjectHeight;
-		    let h2 = this.pointToElevation(point2,raster) + raster.objectHeight;
+		    let h1 = raster.centerElevation;
+		    let h2 = this.pointToElevation(point2,raster);
 		    return (h2 - h1) / this.distance(point1,point2);
   		},
 
@@ -407,17 +472,6 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon, SM
 		          		rings.push(newRing);
 		        	}
 		        }
-
-		        // sort by largest (most vertices in ring) first
-		        // rings.sort((a,b) => {
-		        //     if (a.points.length > b.points.length){
-		        //       return -1;
-		        //     } else if (a.points.length < b.points.length){
-		        //       return 1;
-		        //     } else {
-		        //       return 0;
-		        //     }
-	        	// });
 		        
 		        // reverse rings that are inside and count "children" rings that each ring contains
 		        this.evenOddCheck(rings);
@@ -538,10 +592,12 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon, SM
 			});
 		},
 
+		// translate rings of [x,y] (raster) into rings of [lng,lat] (map)
   		ringToMap: function(points,raster){
     		return points.map((p)=> this.pointToLngLat(p,raster));
   		},
 
+  		// find next true/false border for ring tracing
   		findNext: function(point,raster){
     		let idx = this.pointToIndex(point,raster.pixelsWidth,raster.pixelsLength);
     		while (idx < raster.pixelsLength && raster.pixels[idx] === false){
@@ -556,6 +612,7 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon, SM
 
   		},	
 
+  		// find the next ring
 	  	findRing: function(point,raster, id){
 		    let ring = [],
 		        origin = [point[0],point[1]],
@@ -621,7 +678,7 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon, SM
 		    	points: ring,
 			    area: area,
 			    xMin: xMin,
-			    yAtXmin: yAtXmin,
+			    yAtXmin: yAtXmin, // used for even-odd check
 			    yMin: yMin,
 			    xMax: xMax,
 			    yMax: yMax,
@@ -630,6 +687,7 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon, SM
 		    };
 		},
 
+		// flip ring to be all falses
   		flipRing: function(ring,raster){
 		    let x, y, xMax, yMin;
 		    let y1 = ring.points[0][1];
@@ -648,6 +706,7 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon, SM
     		});
   		},
 
+  		// flip a point from true to false
   		flipPoint: function(point,raster){
 		    let idx = this.pointToIndex(point, raster.pixelsWidth, raster.pixelsLength);
 		    if (idx){
