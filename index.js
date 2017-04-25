@@ -8,12 +8,14 @@ require({
   "esri/symbols/SimpleFillSymbol",
   "esri/Color",
   "esri/Graphic",
+  "esri/geometry/Point",
+  "esri/symbols/SimpleMarkerSymbol",
   "ClientVS",
   "dojo/domReady!"
 ], function( Map, SceneView,
     SimpleFillSymbol,
     Color, Graphic,
-    ClientVS ) 
+    Point, SMS, ClientVS ) 
 {
   let map = new Map({
     basemap: "satellite",
@@ -27,6 +29,8 @@ require({
     center: [-101.17, 21.78]
   });
 
+  clearbtn.addEventListener('click', e => view.graphics.removeAll());
+
   let vsFill = new SimpleFillSymbol({
     color: new Color([130, 242, 145, 0.5]),
     outline: { // autocasts as new SimpleLineSymbol()
@@ -39,13 +43,28 @@ require({
   let vs = new ClientVS(view);
 
   view.on('click', e => {
+
+    // add point symbol to show observer
+    view.graphics.add(new Graphic({
+      geometry: e.mapPoint,
+      symbol: new SMS({
+        style: "circle",
+        color: "blue",
+        size: "10px",
+        outline: {
+          color: [ 0, 0, 0 ],
+          width: 3
+        }
+      })
+    }));
+
     // resolves into a single polygon multiringed polygon
     vs.doClientVS({
       inputGeometry: e.mapPoint, // observer position
-      radius: 2000, // radius in meters
-      pixelWidth: 15, // resolution of viewshed in meters
-      observerHeight: 2, // height observer in meters
-      objectHeight: 0, // height of the thing being observed, 0 for ground
+      radius: radius.value, // radius in meters
+      pixelWidth: resolution.value, // resolution of viewshed in meters
+      observerHeight: obsheight.value, // height observer in meters
+      objectHeight: tarheight.value, // height of the thing being observed, 0 for ground
     }).then(polygon => {
       
       let g = new Graphic({

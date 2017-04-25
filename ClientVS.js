@@ -6,10 +6,8 @@ define('ClientVS', [
 	"esri/geometry/Circle",
 	"esri/geometry/Polyline",
 	"esri/geometry/Polygon",
-	"esri/symbols/SimpleMarkerSymbol",
-	"esri/Graphic"
 ],
-function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon, SMS, G) {
+function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon) {
 	return declare(null, {
 	    constructor: function(view){
 	      if (!view){
