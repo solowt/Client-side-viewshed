@@ -1,5 +1,7 @@
 # A client-side viewshed tool using the [Esri JavaScript API](https://developers.arcgis.com/javascript/)
 
+## [Demo](https://solowt.github.io/Client-side-viewshed/)
+
 ## Why?
 
 I wanted to learn something about raster analysis, polygon drawing rules in the JS API, and how elevation data is handled by the API.
@@ -12,8 +14,8 @@ If you don't have elevation data, you can use Esri's world elevation layer for f
 
   * This tool will only work if you are using a 3D scene view with elevation added to it.
   * The calculation will be done using whatever data the browser has when you call the `doClientVS` function.  If you aren't zoomed in, the data might be lower resolution, and the results may be worse.
-  * If you set the resolution too low, it will probably crash your browser.  Resolution and radius are the main inputs you have to be careful of.
-  * The viewshed algorithm is something like like the "RFVS algorithm" described [here](http://www.geoinfo.info/proceedings_geoinfo2013.split/paper9.pdf).
+  * If you set the `pixelWidth` too low, it will probably crash your browser.  Pixel width (Resolution) and radius are the main inputs you have to be careful of.
+  * The viewshed algorithm is something like the "RFVS algorithm" described [here](http://www.geoinfo.info/proceedings_geoinfo2013.split/paper9.pdf).
   * In order to rasterize the lines, I used [Bresenham's algorithm](https://en.wikipedia.org/wiki/Bresenham's_line_algorithm).
   * In order to trace the polygon rings, I used the [potrace algorithm](http://potrace.sourceforge.net/potrace.pdf).
 
