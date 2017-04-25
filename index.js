@@ -58,13 +58,13 @@ require({
       })
     }));
 
+
     // resolves into a single polygon multiringed polygon
     vs.doClientVS({
       inputGeometry: e.mapPoint, // observer position
-      radius: radius.value, // radius in meters
-      pixelWidth: resolution.value, // resolution of viewshed in meters
-      observerHeight: obsheight.value, // height observer in meters
-      objectHeight: tarheight.value, // height of the thing being observed, 0 for ground
+      radius: parseInt(radius.value,10), // radius in meters
+      pixelWidth: parseInt(resolution.value,10), // resolution of viewshed in meters
+      observerHeight: parseInt(obsheight.value,10) // height observer in meters
     }).then(polygon => {
       
       let g = new Graphic({

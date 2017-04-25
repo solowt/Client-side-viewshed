@@ -73,8 +73,7 @@ require({ // dojo loader magic to load a local module along with CDN modules
 	      	inputGeometry: e.mapPoint, // observer position
 	        radius: 2000, // radius in meters
 	        pixelWidth: 20, // resolution of viewshed in meters.  width of each pixel
-	        observerHeight: 2, // height of the observer in meters
-	        objectHeight: 0, // height of the thing you're looking for, 0 for ground
+	        observerHeight: 2 // height of the observer in meters
 	    }).then(polygon => { // resolves to polygon geometry
     	
     	let g = new Graphic({

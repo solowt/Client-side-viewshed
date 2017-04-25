@@ -25,7 +25,6 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon) {
 		* 	{number} - radius - radius of viewshed in meters
 		*   {number} - pixelWidth - width/height of pixel in meters, determines resolution of viewshed. lower is more accurate but slower
 		* 	{number} - observerHeight - height of observer above terrain in meters
-		*   {number} - objectHeight - height of thing being observed in meters
 		*
 		* @returns {Promise} -> resolves to a polygon geometry
 		*/
@@ -34,10 +33,9 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon) {
 
 		    	// defaults
 		  	    let point = options.inputGeometry.spatialReference.isWGS84 ? wmUtils.geographicToWebMercator(options.inputGeometry) : options.inputGeometry,
-			        radius = options.radius || 5000,
+			        radius = options.radius || 2000,
 			        resolution = options.pixelWidth || 20,
-			        subjectHeight = options.observerHeight || 2,
-			        objectHeight = options.objectHeight || 0;
+			        subjectHeight = options.observerHeight || 2;
 
 			    // create a circle based on radius and center
 			    let circle = this.buildCircle([point.longitude, point.latitude], radius);
@@ -66,7 +64,6 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon) {
 			            pixelsCenter: [Math.floor(xAxis.length/2),Math.floor(yAxis.length/2)], // center of pixels in [X,Y] form
 			            geoPointCenter: [xAxis[Math.floor(xAxis.length/2)][0],yAxis[Math.floor(yAxis.length/2)][1]], // center of pixels in map space
 			            subjectHeight: subjectHeight,
-			            objectHeight: objectHeight, 
 			            resolution: resolution
 			        }
 
@@ -83,7 +80,7 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon) {
 			        		return raster.centerElevation;
 			        	} else {
 			        		// get elevation + observed height with earth's curve accounted for
-					        return this.geoPointToElevation(wmUtils.webMercatorToGeographic(geoPoint), this.view, distance, raster);
+					        return this.geoPointToElevation(wmUtils.webMercatorToGeographic(geoPoint), this.view, distance, raster.resolution);
 			        	}
 			        });
 
@@ -287,11 +284,12 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon) {
 
   		// given a point, the distance (in raster space) and some other stuff, return an elevation.
   		// this takes the earth's curvature into account.
-  		geoPointToElevation: function(point, view, distance, raster){
-		    let baseElevation = view.basemapTerrain.getElevation(point) + raster.objectHeight;
-		    let realElevation = this.earthCurveOffset(raster.resolution, distance, baseElevation);
-
-		    return realElevation;
+  		geoPointToElevation: function(point, view, distance, resolution){
+		    let baseElevation = view.basemapTerrain.getElevation(point);
+		    let realElevation = this.earthCurveOffset(resolution, distance, baseElevation);
+		    // console.log(baseElevation)
+		    return baseElevation;
+		    // return realElevation;
   		},
 
   		// does a look up in the already-built elevation raster
@@ -421,6 +419,7 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon) {
 			        	point: p
 			        }
       			} else {
+      				// add target height here
 			        let slopeRes = this.slope(origin, p, raster);
 			        if (slopeRes >= highestSlope){
           				highestSlope = slopeRes;
