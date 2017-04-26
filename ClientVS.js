@@ -479,13 +479,12 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon) {
 		        
 		        // sort array again by children, parents must come before children or
 		        // array will not be drawn properly
-		        let parents = rings.filter(ring => !ring.parent && ring.children.length > 0);
+		        let parents = rings.filter(ring => ring.parent === null && ring.children.length > 0);
 		        let resultRings = []
 
 		        parents.forEach(p => resultRings = resultRings.concat(this.getChildren(p, rings)));
 		        // resultRings.shift(); //remove fake node, which is first and has id of null
-		        resultRings = resultRings.concat(rings.filter(ring => !ring.parent && ring.children.length === 0));
-		        console.log(rings.length, resultRings.length)
+		        resultRings = resultRings.concat(rings.filter(ring => ring.parent === null && ring.children.length === 0));
 		        
 		      	resultRings.forEach(ring => ring.points = this.ringToMap(ring.points,raster));
 		    	resolve(resultRings);
@@ -590,21 +589,13 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon) {
 				// map of ring id (idx) to bool: does that ring contain this ring?
 				// we need this to determine ring order.  if the ring being checked is
 				// contained by each ring, push this ring's id (idx) onto that ring's children array
-				inner:
 				for (let m = 0; m < intersectionsMap.length; m++){
 					if (intersectionsMap[m].intersections % 2 !== 0){
 						ring.parent = intersectionsMap[m].id;
 						rings[intersectionsMap[m].id].children.push(ring.id);
-						break inner;
+						break;
 					}
 				}
-				// intersectionMap.forEach((intersectionCounter) => {
-				// 	if (intersectionCounter.intersections % 2 !== 0){
-				// 		ring.parents.push(index);
-				// 		rings[index].children.push(idx)
-				// 	}
-				// });
-
 			});
 		},
 
