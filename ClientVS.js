@@ -276,10 +276,14 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon) {
 
   		// given an [x,y] point, return a [lng,lat] (map space)
   		pointToLngLat: function(point,raster){
-    		return [
-			    raster.xAxis[point[0]][0],
-			    raster.yAxis[point[1]][1]
-    		]
+  			if (raster.xAxis[point[0]] && raster.xAxis[point[1]]){
+	    		return [
+				    raster.xAxis[point[0]][0],
+				    raster.yAxis[point[1]][1]
+	    		]
+  			} else {
+  				return null;
+  			}
   		},
 
   		// given a point, the distance (in raster space) and some other stuff, return an elevation.
@@ -475,12 +479,13 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon) {
 		        
 		        // sort array again by children, parents must come before children or
 		        // array will not be drawn properly
-		        let parents = rings.filter(ring => ring.parents.length === 0 && ring.children.length > 0);
+		        let parents = rings.filter(ring => !ring.parent && ring.children.length > 0);
 		        let resultRings = []
 
 		        parents.forEach(p => resultRings = resultRings.concat(this.getChildren(p, rings)));
 		        // resultRings.shift(); //remove fake node, which is first and has id of null
-		        resultRings = resultRings.concat(rings.filter(ring => ring.parents.length === 0 && ring.children.length === 0));
+		        resultRings = resultRings.concat(rings.filter(ring => !ring.parent && ring.children.length === 0));
+		        console.log(rings.length, resultRings.length)
 		        
 		      	resultRings.forEach(ring => ring.points = this.ringToMap(ring.points,raster));
 		    	resolve(resultRings);
@@ -536,11 +541,11 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon) {
 		*/
 
 		evenOddCheck: function(rings){
-			rings.forEach((ring,idx) => {
+			rings.forEach(ring => {
 				let intersections = 0; // total intersections with other rings
 
-				// map ring id (array index) to specific intersections with that ring
-				let intersectionMap = new Array(rings.length).fill(0);
+				// map ring ids to # of interections on this ring
+				let intersectionsMap = [];
 				
 				// start at the x min on each ring and decrement until it hits 0
 				let x = ring.xMin;
@@ -548,7 +553,7 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon) {
 				
 				while (x > 0){
 					for (let j = 0; j < rings.length; j++){
-						if (j !== idx && // first condition: we don't care about this ring intersecting itself
+						if (j !== ring.id && // first condition: we don't care about this ring intersecting itself
 							(x >= rings[j].xMin && // second condition: this is a test to make sure that the point is inside
 							x <= rings[j].xMax &&  // the bounding box of the ring being checked.  if it is not inside, there 
 							y >= rings[j].yMin &&  // cannot be an intersection so we don't need to test it.  this saves us some testing
@@ -562,7 +567,12 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon) {
 									((points[k][0] === x) || (points[l][0] === x))){
 									
 									intersections += 1;
-									intersectionMap[rings[j].id] += 1;
+									let index = intersectionsMap.findIndex(r => r.id === rings[j].id);
+									if (index !== -1){
+										intersectionsMap[index].intersections += 1;
+									} else {
+										intersectionsMap.push({id:rings[j].id, intersections: 1});
+									}
 								}
 								l = k;
 							}
@@ -572,26 +582,35 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon) {
 					
 				}
 
-				// map of ring id (idx) to bool: does that ring contain this ring?
-				// we need this to determine ring order.  if the ring being checked is
-				// contained by each ring, push this ring's id (idx) onto that ring's children array
-				intersectionMap.forEach((intersectionCount,index) => {
-					if (intersectionCount % 2 !== 0){
-						ring.parents.push(index);
-						rings[index].children.push(idx)
-					}
-				});
-
 				// if total intersections is not even, reverse ring so it will be ccw 
 				if (intersections % 2 !== 0){
 					ring.points.reverse();
 				}
+
+				// map of ring id (idx) to bool: does that ring contain this ring?
+				// we need this to determine ring order.  if the ring being checked is
+				// contained by each ring, push this ring's id (idx) onto that ring's children array
+				inner:
+				for (let m = 0; m < intersectionsMap.length; m++){
+					if (intersectionsMap[m].intersections % 2 !== 0){
+						ring.parent = intersectionsMap[m].id;
+						rings[intersectionsMap[m].id].children.push(ring.id);
+						break inner;
+					}
+				}
+				// intersectionMap.forEach((intersectionCounter) => {
+				// 	if (intersectionCounter.intersections % 2 !== 0){
+				// 		ring.parents.push(index);
+				// 		rings[index].children.push(idx)
+				// 	}
+				// });
+
 			});
 		},
 
 		// translate rings of [x,y] (raster) into rings of [lng,lat] (map)
   		ringToMap: function(points,raster){
-    		return points.map((p)=> this.pointToLngLat(p,raster));
+    		return points.map((p)=> this.pointToLngLat(p,raster)).filter(point => point);
   		},
 
   		// find next true/false border for ring tracing
@@ -680,7 +699,7 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon) {
 			    xMax: xMax,
 			    yMax: yMax,
 			    children: [], // used later
-			    parents: [] // used later
+			    parent: null // used later
 		    };
 		},
 
