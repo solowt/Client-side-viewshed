@@ -90,7 +90,7 @@ require({ // dojo loader magic to load a local module along with CDN modules
 
 ## Speeding up the calculation
 
-95% of the calculation time is spent doing lookups for elevation in the client-side elevation data store.  There are a few possible ways to speed this.
+95% of the calculation time is spent doing lookups for elevation in the client-side elevation data store.  There are a few possible ways to speed this up.
 
 You might copy the data as an array buffer to a web worker and perform the look ups there.  You could also attempt to "stitch" together different rasters and do the elevation lookups directly on the resulting raster, instead of having to search through the entire tile tree.
 
