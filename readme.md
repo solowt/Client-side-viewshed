@@ -90,8 +90,8 @@ require({ // dojo loader magic to load a local module along with CDN modules
 
 ## Speeding up the calculation
 
-There are various ways you might speed up this calculation.  One would be seeing how much can be offloaded to another thread (web worker).  The problem here is that the most expensive part of the computation involves doing several thousand lookups in the elevation raster, and this lookup occurs on the view.  To make good use of a web worker, a lot of data would have to be copied to the web worker's context, along with the logic to do the lookup and bilinear interpolation.  I don't really anything about the ovearhead of copying between threads, but this might be worth trying.
+95% of the calculation time is spent doing lookups for elevation in the client-side elevation data store.  There are a few possible ways to speed this.
 
-Another method would be doing the computation on the underlying elevation rasters themselves, rather than by querying the view which in turn does a lookup in the rasters.  In order to get this to work, you'd need to stitch together a few different elevation tiles in cases where the viewshed circle overlaps more than one tile.  This is certainly possible but it would be a fair amount of work.
+You might copy the data as an array buffer to a web worker and perform the look ups there.  You could also attempt to "stitch" together different rasters and do the elevation lookups directly on the resulting raster, instead of having to search through the entire tile tree.
 
-If you succeeded in using the underlying rasters, you could probably offload all the real work to the GPU as the "can point X see point Y" calculations themselves are pretty straightforward and it doesn't take much imagination to convert them to GLSL.
+I might check out at least one of these options.
