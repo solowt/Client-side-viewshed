@@ -29,73 +29,79 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon) {
     * @returns {Promise} -> resolves to a polygon geometry
     */
     doClientVS(options){
-      return new Promise((fulfill, reject) => {
-
-          // defaults
+      // defaults
       let point = options.inputGeometry.spatialReference.isWGS84 ? wmUtils.geographicToWebMercator(options.inputGeometry) : options.inputGeometry,
         radius = options.radius || 2000,
         resolution = options.pixelWidth || 20,
         subjectHeight = options.observerHeight || 2;
 
-        // create a circle based on radius and center
-        let circle = this.buildCircle([point.longitude, point.latitude], radius);
-         
-        // create the bounds.  you can think of this as the x axis, y axis, top, and bottom of the raster
-        // these are just polylines densified by the input resolution
-        this.buildBounds(circle, resolution).then(bounds => {
-          let xAxis = bounds.x.paths[0];
-          let yAxis = bounds.y.paths[0];
-          let top = bounds.top.paths[0];
-          let right = bounds.right.paths[0];
-          // this will hold all the elevation values
-          let elevationRaster = new Array(xAxis.length * yAxis.length).fill(null);
-          let raster = {
-            view: this.view,
-            pixels: new Array(xAxis.length * yAxis.length).fill(false), // visibility raster, start everything as false
-            circle: circle,
-              xAxis: xAxis,
-              yAxis: yAxis,
-              top: top,
-              right: right,
-              pixelsLength: xAxis.length * yAxis.length, // total number of pixels
-              pixelsWidth: xAxis.length, // width of raster
-              pixelsCenter: [Math.floor(xAxis.length/2),Math.floor(yAxis.length/2)], // center of pixels in [X,Y] form
-              geoPointCenter: [xAxis[Math.floor(xAxis.length/2)][0],yAxis[Math.floor(yAxis.length/2)][1]], // center of pixels in map space
-              subjectHeight: subjectHeight,
-              resolution: resolution
-          }
+      // create a circle based on radius and center
+      let circle = this.buildCircle([point.longitude, point.latitude], radius);
+       
+      // create the bounds.  you can think of this as the x axis, y axis, top, and bottom of the raster
+      // these are just polylines densified by the input resolution
+      return this.buildBounds(circle, resolution).then(bounds => {
+        let xAxis = bounds.x.paths[0];
+        let yAxis = bounds.y.paths[0];
+        let top = bounds.top.paths[0];
+        let right = bounds.right.paths[0];
+        // this will hold all the elevation values
+        let elevationRaster = new Array(xAxis.length * yAxis.length).fill(null);
+        let raster = {
+          view: this.view,
+          pixels: new Array(xAxis.length * yAxis.length).fill(false), // visibility raster, start everything as false
+          circle: circle,
+          xAxis: xAxis,
+          yAxis: yAxis,
+          top: top,
+          right: right,
+          pixelsLength: xAxis.length * yAxis.length, // total number of pixels
+          pixelsWidth: xAxis.length, // width of raster
+          pixelsCenter: [Math.floor(xAxis.length/2),Math.floor(yAxis.length/2)], // center of pixels in [X,Y] form
+          geoPointCenter: [xAxis[Math.floor(xAxis.length/2)][0],yAxis[Math.floor(yAxis.length/2)][1]], // center of pixels in map space
+          subjectHeight: subjectHeight,
+          resolution: resolution
+        }
 
-          // fetch all the needed elevations from the basemapTerrain
-          elevationRaster = elevationRaster.map((cell, index) => {
+        let now = Date.now();
+        // fetch all the needed elevations from the basemapTerrain
+        return this.view.map.ground.createElevationSampler(circle.extent, {
+          demResolution: "auto"
+        })
+        .then(sampler => {
+          console.log(sampler);
+          // for (let i = 0;)
+          raster.elevationRaster = elevationRaster.map((cell, index) => {
             let point = this.indexToPoint(index, raster.pixelsWidth); // the point whose elevation is being fetched
             let distance = this.distance(point, raster.pixelsCenter); // distance to observer in raster space
             let geoPoint = this.indexToGeoPoint(index, raster); // map space point for the point
             // if index being checked is raster center
             if (distance === 0){
               // just get elevation + observer height.  store on raster because we need to calculate this a lot
-              raster.centerElevation = this.view.basemapTerrain.getElevation(wmUtils.webMercatorToGeographic(geoPoint)) + raster.subjectHeight;
+              raster.centerElevation = sampler.queryElevation(wmUtils.webMercatorToGeographic(geoPoint)).z + raster.subjectHeight;
               return raster.centerElevation;
             } else {
               // get elevation + observed height with earth's curve accounted for
-              return this.geoPointToElevation(wmUtils.webMercatorToGeographic(geoPoint), this.view, distance, raster.resolution);
+              let e = this.geoPointToElevation(wmUtils.webMercatorToGeographic(geoPoint), this.view, distance, raster.resolution, sampler);
+              // console.log(e)
+              return e;
             }
           });
-
-          raster.elevationRaster = elevationRaster;
+          console.log(raster)
+          console.log(Date.now() - now);
 
           // now that we have the raster filled in, do the actual computation
-          this.computeViewshed(raster).then(result => {
-              
-          // the rings are returned by the computation
-          let rings = result.map((r)=>r.points);
+          return this.computeViewshed(raster).then(result => {
+            // the rings are returned by the computation
+            let rings = result.map((r)=>r.points);
 
-          // fulfill the polygon geometry
-          fulfill(new Polygon({
+            // fulfill the polygon geometry
+            return new Polygon({
               rings: rings,
               spatialReference: { wkid: 3857 }
-            }));
+            });
           });
-        });
+        })
       });
     },
 
@@ -281,11 +287,12 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon) {
 
     // given a point, the distance (in raster space) and some other stuff, return an elevation.
     // this takes the earth's curvature into account.
-    geoPointToElevation: function(point, view, distance, resolution){
-      let baseElevation = view.basemapTerrain.getElevation(point);
-      let realElevation = this.earthCurveOffset(resolution, distance, baseElevation);
+    geoPointToElevation: function(point, view, distance, resolution, sampler){
+      let baseElevation = sampler.queryElevation(point);
+      // let baseElevation = view.basemapTerrain.getElevation(point);
+      // let realElevation = this.earthCurveOffset(resolution, distance, baseElevation);
       // console.log(baseElevation)
-      return baseElevation;
+      return baseElevation.z;
       // return realElevation;
     },
 
