@@ -1,6 +1,6 @@
 require({
   packages: [
-      { name: "ClientVS", location: location.pathname.replace(/\/[^/]+$/, ''), main: 'ClientVS' }
+      { name: "ClientVS", location: location.href.replace(/\/[^/]+$/, ''), main: 'ClientVS' }
     ]
 },[
   "esri/Map",
