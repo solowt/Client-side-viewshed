@@ -6,8 +6,11 @@ define('ClientVS', [
   "esri/geometry/Circle",
   "esri/geometry/Polyline",
   "esri/geometry/Polygon",
+  "esri/geometry/Multipoint",
+  "esri/geometry/support/meshUtils",
+  "esri/Graphic"
 ],
-function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon) {
+function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon, Multipoint, meshUtils, Graphic) {
   return declare(null, {
     constructor: function(view){
       if (!view){
@@ -63,32 +66,32 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon) {
           resolution: resolution
         }
 
+        raster.centerIndex = this.pointToIndex(raster.pixelsCenter, raster.pixelsWidth, raster.pixelsLength);
+
         let now = Date.now();
         // fetch all the needed elevations from the basemapTerrain
         return this.view.map.ground.createElevationSampler(circle.extent, {
-          demResolution: "auto"
+          demResolution: 1000
         })
         .then(sampler => {
-          console.log(sampler);
-          // for (let i = 0;)
-          raster.elevationRaster = elevationRaster.map((cell, index) => {
-            let point = this.indexToPoint(index, raster.pixelsWidth); // the point whose elevation is being fetched
-            let distance = this.distance(point, raster.pixelsCenter); // distance to observer in raster space
-            let geoPoint = this.indexToGeoPoint(index, raster); // map space point for the point
-            // if index being checked is raster center
-            if (distance === 0){
-              // just get elevation + observer height.  store on raster because we need to calculate this a lot
-              raster.centerElevation = sampler.queryElevation(wmUtils.webMercatorToGeographic(geoPoint)).z + raster.subjectHeight;
-              return raster.centerElevation;
-            } else {
-              // get elevation + observed height with earth's curve accounted for
-              let e = this.geoPointToElevation(wmUtils.webMercatorToGeographic(geoPoint), this.view, distance, raster.resolution, sampler);
-              // console.log(e)
-              return e;
-            }
+          const points = elevationRaster.map((cell, index) => {
+            return this.indexToXY(index, raster);
           });
-          console.log(raster)
-          console.log(Date.now() - now);
+
+          let multipoint = new Multipoint({
+            points,
+            spatialReference: { wkid: 3857 }
+          });
+
+          multipoint = sampler.queryElevation(multipoint);
+
+          raster.elevationRaster = multipoint.points.map((point, index) => {
+            if (index === raster.centerIndex) {
+              const elevationAtCenter = point[2] + raster.subjectHeight;
+              raster.centerElevation = elevationAtCenter;
+            }
+            return point[2];
+          });
 
           // now that we have the raster filled in, do the actual computation
           return this.computeViewshed(raster).then(result => {
@@ -262,6 +265,14 @@ function (declare, Point, geoEngineAsync, wmUtils, Circle, Polyline, Polygon) {
     indexToGeoPoint: function(idx,raster){
       let point = this.indexToPoint(idx,raster.pixelsWidth);
       return this.pointToGeoPoint(point,raster);
+    },
+
+    indexToXY: function(idx, raster) {
+      let point = this.indexToPoint(idx,raster.pixelsWidth);
+      return [
+        raster.xAxis[point[0]][0],
+        raster.yAxis[point[1]][1]
+      ];
     },
 
       // go from raster space to map space

@@ -1,0 +1,10 @@
+{
+    "presets": [
+        ["es2015"],
+        ["es2015-loose"],
+        ["stage-2"]
+    ],
+    "plugins": [
+        ["transform-es2015-modules-umd"]
+    ]
+}

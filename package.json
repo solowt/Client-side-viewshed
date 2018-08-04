@@ -1,0 +1,22 @@
+{
+  "name": "vs",
+  "version": "1.0.0",
+  "description": "## [Demo](https://solowt.github.io/Client-side-viewshed/)",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/solowt/Client-side-viewshed.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/solowt/Client-side-viewshed/issues"
+  },
+  "homepage": "https://github.com/solowt/Client-side-viewshed#readme",
+  "dependencies": {
+    "fit-curve": "^0.1.6"
+  }
+}
