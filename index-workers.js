@@ -3,19 +3,20 @@ require({
       { name: "ClientVS", location: location.href.replace(/\/[^/]+$/, ''), main: 'ClientVS' }
     ]
 },[
+  "esri/core/workers",
   "esri/Map",
   "esri/views/SceneView",
   "esri/symbols/SimpleFillSymbol",
   "esri/Color",
   "esri/Graphic",
   "esri/geometry/Point",
+  "esri/geometry/Polygon",
   "esri/symbols/SimpleMarkerSymbol",
-  "ClientVS",
   "dojo/domReady!"
-], function( Map, SceneView,
+], function( workers, Map, SceneView,
     SimpleFillSymbol,
     Color, Graphic,
-    Point, SMS, ClientVS ) 
+    Point, Polygon, SMS ) 
 {
   let map = new Map({
     basemap: "satellite",
@@ -39,8 +40,18 @@ require({
     }
   });
 
-  // create a new viewshed calculator
-  let vs = new ClientVS();
+  let local = window.location.href.substring(0, window.location.href.lastIndexOf('/'));
+  let workerUrl = local + "/ClientVS.js";
+  let workerConnection;
+
+  let workerPromise = workers.open(workerUrl, {
+    strategy: "dedicated"
+  });
+
+  workerPromise.then(connection => {
+    workerConnection = connection;
+  })
+  .catch(e => console.log(e));
 
   view.on('click', e => {
 
@@ -60,19 +71,23 @@ require({
 
 
     // resolves into a single polygon multiringed polygon
-    vs.doClientVS({
-      inputGeometry: e.mapPoint, // observer position
-      radius: parseInt(radius.value,10), // radius in meters
-      pixelWidth: parseInt(resolution.value,10), // resolution of viewshed in meters
-      observerHeight: parseInt(obsheight.value,10) // height observer in meters
-    }).then(polygon => {
-      
-      let g = new Graphic({
-        geometry: polygon,
-        symbol: vsFill
-      });
+    workerPromise.
+    then(() => {
+      workerConnection.invoke("doClientVS", {
+        inputGeometry: e.mapPoint.toJSON(), // observer position
+        radius: parseInt(radius.value, 10), // radius in meters
+        pixelWidth: parseInt(resolution.value, 10), // resolution of viewshed in meters
+        observerHeight: parseInt(obsheight.value, 10) // height observer in meters
+      })
+      .then(polygon => {
+        let g = new Graphic({
+          geometry: Polygon.fromJSON(polygon),
+          symbol: vsFill
+        });
 
-      view.graphics.add(g);
+        view.graphics.add(g);
+      })
+      .catch(e => console.log(e));
     });
   });
 });
