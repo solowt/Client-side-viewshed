@@ -87,9 +87,9 @@ function (Point, geoEngine, wmUtils, Circle, Polyline, Polygon, Multipoint, Elev
         });
 
         // now that we have the raster filled in, do the actual computation
-        return this.computeViewshed(raster).then(result => {
+        return this.computeViewshed(raster).then(rings => {
           // the rings are returned by the computation
-          let rings = result.map((r)=>r.points);
+          // let rings = result.map((r)=>r.points);
 
           // fulfill the polygon geometry
           return new Polygon({
@@ -193,6 +193,8 @@ function (Point, geoEngine, wmUtils, Circle, Polyline, Polygon, Multipoint, Elev
         let resultLine = this.testLine(line,raster);
         this.flipLine(resultLine,raster); // for pixels in the line that can be seen, change them to true
       });
+
+      raster.resultRaster = raster.pixels.slice();
 
       // once the raster is complete, we need to trace the edges of the visibile areas to get the rings
       // of the resulting polygon
@@ -476,18 +478,24 @@ function (Point, geoEngine, wmUtils, Circle, Polyline, Polygon, Multipoint, Elev
       }
           
       // reverse rings that are inside and count "children" rings that each ring contains
-      this.evenOddCheck(rings);
+      // this.evenOddCheck(rings);
+
+      const resultRings = rings.filter(ring => ring.points && ring.points.length > 0)
+        .map(ring => ring.points)
+        .map(ring => {
+          return this.ringToMap(ring, raster)
+        });
       
       // sort array again by children, parents must come before children or
       // array will not be drawn properly
-      let parents = rings.filter(ring => ring.parent === null && ring.children.length > 0);
-      let resultRings = []
+      // let parents = rings.filter(ring => ring.parent === null && ring.children.length > 0);
+      // let resultRings = []
 
-      parents.forEach(p => resultRings = resultRings.concat(this.getChildren(p, rings)));
-      // resultRings.shift(); //remove fake node, which is first and has id of null
-      resultRings = resultRings.concat(rings.filter(ring => ring.parent === null && ring.children.length === 0));
+      // parents.forEach(p => resultRings = resultRings.concat(this.getChildren(p, rings)));
+      // // resultRings.shift(); //remove fake node, which is first and has id of null
+      // resultRings = resultRings.concat(rings.filter(ring => ring.parent === null && ring.children.length === 0));
       
-      resultRings.forEach(ring => ring.points = this.ringToMap(ring.points,raster));
+      // resultRings.forEach(ring => ring.points = this.ringToMap(ring.points,raster));
       resolve(resultRings);
     });
   }
@@ -632,6 +640,9 @@ function (Point, geoEngine, wmUtils, Circle, Polyline, Polygon, Multipoint, Elev
       area = 0,
       tmp;
 
+    const index = this.pointToIndex([x, y], raster.pixelsWidth, raster.pixelsLength);
+    const sign = (raster.resultRaster[index]);
+
     while (true){
       ring.push([x,y]);
 
@@ -679,7 +690,7 @@ function (Point, geoEngine, wmUtils, Circle, Polyline, Polygon, Multipoint, Elev
 
     return {
       id: id, // idx of ring, used to key this ring when it gets re-ordered later
-      points: ring,
+      points: sign ? ring : ring.reverse(),
       area: area,
       xMin: xMin,
       yAtXmin: yAtXmin, // used for even-odd check
