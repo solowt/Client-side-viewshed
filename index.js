@@ -43,6 +43,7 @@ require({
   let vs = new ClientVS();
 
   view.on('click', e => {
+    console.log(e.mapPoint);
 
     // add point symbol to show observer
     view.graphics.add(new Graphic({

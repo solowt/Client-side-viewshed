@@ -641,7 +641,7 @@ function (Point, geoEngine, wmUtils, Circle, Polyline, Polygon, Multipoint, Elev
       tmp;
 
     const index = this.pointToIndex([x, y], raster.pixelsWidth, raster.pixelsLength);
-    const sign = (raster.resultRaster[index]);
+    const sign = raster.resultRaster[index];
 
     while (true){
       ring.push([x,y]);
@@ -688,6 +688,7 @@ function (Point, geoEngine, wmUtils, Circle, Polyline, Polygon, Multipoint, Elev
       }
     }  
 
+    console.log(id - sign ? "no flip" : "yes flip");
     return {
       id: id, // idx of ring, used to key this ring when it gets re-ordered later
       points: sign ? ring : ring.reverse(),
