@@ -688,7 +688,7 @@ function (Point, geoEngine, wmUtils, Circle, Polyline, Polygon, Multipoint, Elev
       }
     }  
 
-    console.log(id - sign ? "no flip" : "yes flip");
+    console.log(sign ? `${id} - flip` : `${id} - no flip`);
     return {
       id: id, // idx of ring, used to key this ring when it gets re-ordered later
       points: sign ? ring : ring.reverse(),

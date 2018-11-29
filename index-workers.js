@@ -27,7 +27,11 @@ require({
     container: "viewDiv",
     map: map,
     zoom: 15,
-    center: [-101.17, 21.78]
+    center: {
+      x: -11268848.469625855,
+      y: 2485519.681513185,
+      spatialReference: { wkid: 102100 }
+    }
   });
 
   clearbtn.addEventListener('click', e => view.graphics.removeAll());
