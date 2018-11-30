@@ -29,7 +29,7 @@ function (Point, geoEngine, wmUtils, Circle, Polyline, Polygon, Multipoint, Elev
     let point = options.inputGeometry.spatialReference.isWGS84 ? options.inputGeometry : wmUtils.webMercatorToGeographic(options.inputGeometry),
       radius = options.radius || 2000,
       resolution = options.pixelWidth || 20,
-      subjectHeight = options.observerHeight || 2;
+      subjectHeight = options.observerHeight;
 
     // create a circle based on radius and center
     let circle = this.buildCircle([point.x, point.y], radius);
@@ -476,27 +476,19 @@ function (Point, geoEngine, wmUtils, Circle, Polyline, Polygon, Multipoint, Elev
           rings.push(newRing);
         }
       }
-          
-      // reverse rings that are inside and count "children" rings that each ring contains
-      // this.evenOddCheck(rings);
+      const now = Date.now();
 
-      const resultRings = rings.filter(ring => ring.points && ring.points.length > 0)
-        .map(ring => ring.points)
-        .map(ring => {
-          return this.ringToMap(ring, raster)
-        });
-      
-      // sort array again by children, parents must come before children or
-      // array will not be drawn properly
-      // let parents = rings.filter(ring => ring.parent === null && ring.children.length > 0);
-      // let resultRings = []
+      // re do
+      this.evenOddCheck(rings);
 
-      // parents.forEach(p => resultRings = resultRings.concat(this.getChildren(p, rings)));
-      // // resultRings.shift(); //remove fake node, which is first and has id of null
-      // resultRings = resultRings.concat(rings.filter(ring => ring.parent === null && ring.children.length === 0));
-      
-      // resultRings.forEach(ring => ring.points = this.ringToMap(ring.points,raster));
-      resolve(resultRings);
+      const parents = rings.filter(ring => ring.parent === null && ring.children.length > 0);
+      let resultRings = [];
+      parents.forEach(p => resultRings = resultRings.concat(this.getChildren(p, rings)));
+      resultRings = resultRings.concat(rings.filter(ring => ring.parent === null && ring.children.length === 0));
+      console.log(resultRings[43])
+      resultRings.forEach(ring => ring.points = this.ringToMap(ring.points,raster));
+      const res = resultRings.map(ring => ring.points);
+      resolve(res);
     });
   }
 
@@ -532,6 +524,20 @@ function (Point, geoEngine, wmUtils, Circle, Polyline, Polygon, Multipoint, Elev
     return retArray;
   }
 
+  ClientVS.prototype.pointInPolygon = function(point, polygon) {
+    const [x, y] = point;
+    let ret = false;
+    let j = polygon.length - 1;
+    for (let i = 0; i < polygon.length; i++) {
+      if (((polygon[i][1] > y) !== (polygon[j][1] > y)) &&
+          (x < polygon[i][0] + (polygon[j][0] - polygon[i][0]) * (y - polygon[i][1]) / (polygon[j][1] - polygon[i][1]))) {
+        ret = !ret;
+      }
+      j = i;
+    }
+    return ret;
+  }
+
 /** 
   * evenOddCheck - simple implementation of the even-odd rule: https://en.wikipedia.org/wiki/Even%E2%80%93odd_rule
   *
@@ -545,51 +551,37 @@ function (Point, geoEngine, wmUtils, Circle, Polyline, Polygon, Multipoint, Elev
   * @param {raster} - all data
   */
   ClientVS.prototype.evenOddCheck = function(rings){
-    rings.forEach(ring => {
-      let intersections = 0; // total intersections with other rings
-
+    rings.forEach((ring, idx) => {
       // map ring ids to # of interections on this ring
       let intersectionsMap = [];
       
       // start at the x min on each ring and decrement until it hits 0
-      let x = ring.xMin;
+      let x = ring.xMax - ring.xMin;
       let y = ring.yAtXmin;
       
-      while (x > 0){
-        for (let j = 0; j < rings.length; j++){
-          if (j !== ring.id && // first condition: we don't care about this ring intersecting itself
+      for (let j = 0; j < rings.length; j++) {
+        if (j !== ring.id && // first condition: we don't care about this ring intersecting itself
             (x >= rings[j].xMin && // second condition: this is a test to make sure that the point is inside
             x <= rings[j].xMax &&  // the bounding box of the ring being checked.  if it is not inside, there 
             y >= rings[j].yMin &&  // cannot be an intersection so we don't need to test it.  this saves us some testing
             y <= rings[j].yMax)) {
-
-            let points = rings[j].points;
-            let l = points.length - 1; // check the current point in the ring against the previous to see if it crossed the ring
-
-            for (let k = 0; k < points.length; k++){
-              if (((points[k][1] > y) !== (points[l][1] > y)) &&
-                ((points[k][0] === x) || (points[l][0] === x))){
-                
-                intersections += 1;
-                let index = intersectionsMap.findIndex(r => r.id === rings[j].id);
-                if (index !== -1){
-                  intersectionsMap[index].intersections += 1;
-                } else {
-                  intersectionsMap.push({id:rings[j].id, intersections: 1});
-                }
-              }
-              l = k;
+          const points = rings[j].points;
+          const inside = this.pointInPolygon([x, y], points);
+          if (inside) {
+            const index = intersectionsMap.findIndex(r => r.id === rings[j].id);
+            if (index !== -1){
+              intersectionsMap[index].intersections += 1;
+            } else {
+              intersectionsMap.push({id:rings[j].id, intersections: 1});
             }
           }
         }
-        x--;
-        
       }
 
       // if total intersections is not even, reverse ring so it will be ccw 
-      if (intersections % 2 !== 0){
-        ring.points.reverse();
-      }
+      // if (intersections % 2 !== 0){
+      //   ring.points.reverse();
+      // }
 
       // map of ring id (idx) to bool: does that ring contain this ring?
       // we need this to determine ring order.  if the ring being checked is
@@ -688,10 +680,10 @@ function (Point, geoEngine, wmUtils, Circle, Polyline, Polygon, Multipoint, Elev
       }
     }  
 
-    console.log(sign ? `${id} - flip` : `${id} - no flip`);
+    // console.log( sign ? `${id} - no flip` : `${id} - flip`);
     return {
-      id: id, // idx of ring, used to key this ring when it gets re-ordered later
-      points: sign ? ring : ring.reverse(),
+      id: id,
+      points: !sign ? ring.reverse() : ring,
       area: area,
       xMin: xMin,
       yAtXmin: yAtXmin, // used for even-odd check

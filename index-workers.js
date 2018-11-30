@@ -59,8 +59,8 @@ require({
 
   view.on('click', e => {
     // console.log(e.mapPoint);
-    e.mapPoint.x = -11268848.469625855;
-    e.mapPoint.y = 2485519.681513185;
+    e.mapPoint.x = -11271764.030568797;
+    e.mapPoint.y = 2486890.3095428017
 
     // add point symbol to show observer
     view.graphics.add(new Graphic({
@@ -87,6 +87,7 @@ require({
         observerHeight: parseInt(obsheight.value, 10) // height observer in meters
       })
       .then(polygon => {
+        // console.log(JSON.stringify(polygon.rings));
         let g = new Graphic({
           geometry: Polygon.fromJSON(polygon),
           symbol: vsFill
