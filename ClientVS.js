@@ -1,3 +1,5 @@
+const EARTH_DIAM = 12740000;
+
 define([
   "esri/geometry/Point",
   "esri/geometry/geometryEngine",
@@ -11,7 +13,6 @@ define([
 function (Point, geoEngine, wmUtils, Circle, Polyline, Polygon, Multipoint, ElevationLayer) {
   var ClientVS = function ClientVS(url) {
     this.elevationServiceUrl = url || "//elevation3d.arcgis.com/arcgis/rest/services/WorldElevation3D/Terrain3D/ImageServer";
-    this.EARTH_DIAM = 12740000;
   }
 
  /**
@@ -31,16 +32,14 @@ function (Point, geoEngine, wmUtils, Circle, Polyline, Polygon, Multipoint, Elev
       resolution = options.pixelWidth || 20,
       subjectHeight = options.observerHeight;
 
-    // create a circle based on radius and center
     let circle = this.buildCircle([point.x, point.y], radius);
 
-    // create the bounds.  you can think of this as the x axis, y axis, top, and bottom of the raster
-    // these are just polylines densified by the input resolution
     return this.buildBounds(circle, resolution).then(bounds => {
       let xAxis = bounds.x.paths[0];
       let yAxis = bounds.y.paths[0];
       let top = bounds.top.paths[0];
       let right = bounds.right.paths[0];
+      
       // this will hold all the elevation values
       let elevationRaster = new Array(xAxis.length * yAxis.length).fill(null);
       let raster = {
@@ -60,44 +59,43 @@ function (Point, geoEngine, wmUtils, Circle, Polyline, Polygon, Multipoint, Elev
 
       raster.centerIndex = this.pointToIndex(raster.pixelsCenter, raster.pixelsWidth, raster.pixelsLength);
 
-      let now = Date.now();
-      // fetch all the needed elevations from the basemapTerrain
+      // fetch all the needed elevations from the sampler
       return new ElevationLayer({ url: this.elevationServiceUrl })
-      .createElevationSampler(circle.extent, {
-        demResolution: "finest-contiguous"
-      })
-      .then(sampler => {
-        const points = elevationRaster.map((cell, index) => {
-          return this.indexToXY(index, raster);
-        });
+        .createElevationSampler(circle.extent, {
+          demResolution: "finest-contiguous"
+        })
+        .then(sampler => {
+          const points = elevationRaster.map((cell, index) => {
+            return this.indexToXY(index, raster);
+          });
 
-        let multipoint = new Multipoint({
-          points,
-          spatialReference: { wkid: 3857 }
-        });
-
-        multipoint = sampler.queryElevation(multipoint);
-
-        raster.elevationRaster = multipoint.points.map((point, index) => {
-          if (index === raster.centerIndex) {
-            const elevationAtCenter = point[2] + raster.subjectHeight;
-            raster.centerElevation = elevationAtCenter;
-          }
-          return point[2];
-        });
-
-        // now that we have the raster filled in, do the actual computation
-        return this.computeViewshed(raster).then(rings => {
-          // the rings are returned by the computation
-          // let rings = result.map((r)=>r.points);
-
-          // fulfill the polygon geometry
-          return new Polygon({
-            rings: rings,
+          let multipoint = new Multipoint({
+            points,
             spatialReference: { wkid: 3857 }
-          }).toJSON();
-        });
-      })
+          });
+
+          multipoint = sampler.queryElevation(multipoint);
+
+          raster.elevationRaster = multipoint.points.map((point, index) => {
+            if (index === raster.centerIndex) {
+              const elevationAtCenter = point[2] + raster.subjectHeight;
+              raster.centerElevation = elevationAtCenter;
+            }
+
+            // take earth's curvature into account
+            const rasterPoint = this.indexToPoint(index, raster.pixelsWidth);
+            const real = this.earthCurveOffset(raster.resolution, this.distance(rasterPoint, raster.pixelsCenter), point[2]);
+            return real;
+          });
+
+          return this.computeViewshed(raster).then(rings => {
+
+            return new Polygon({
+              rings: rings,
+              spatialReference: { wkid: 3857 }
+            }).toJSON();
+          });
+        })
     });
   }
 
@@ -175,11 +173,10 @@ function (Point, geoEngine, wmUtils, Circle, Polyline, Polygon, Multipoint, Elev
     });
   }
     
-  // do the actual computation
   ClientVS.prototype.computeViewshed = function(raster){
     let circleRadius = Math.min(raster.pixelsCenter[0],raster.pixelsCenter[1]) - 1;
 
-    // rasterize a circle.  we have the circle in map space, but we need it in raster space
+    // rasterize a circle.  have the circle in map space, but we need it in raster space
     let circle = this.drawCircle(raster.pixelsCenter, circleRadius);
 
 
@@ -187,7 +184,6 @@ function (Point, geoEngine, wmUtils, Circle, Polyline, Polygon, Multipoint, Elev
     // this involves checking the line from the center of the circle to the edge and 
     // walking along it
     return new Promise((resolve,reject)=>{
-
       circle.forEach((point)=>{
         let line = this.drawLine(raster.pixelsCenter,point);
         let resultLine = this.testLine(line,raster);
@@ -216,7 +212,8 @@ function (Point, geoEngine, wmUtils, Circle, Polyline, Polygon, Multipoint, Elev
     * @returns {number} - correct elevation of the point
     */
   ClientVS.prototype.earthCurveOffset = function(resolution, distance, baseElevation){
-    return baseElevation - (.87 * (Math.pow((distance * resolution), 2) / this.EARTH_DIAM));
+    let r = baseElevation - (.87 * (Math.pow((distance * resolution), 2) / EARTH_DIAM));
+    return r;
   }
     
   // count up result pixels to see how many can be seen and how many can't.
@@ -295,19 +292,13 @@ function (Point, geoEngine, wmUtils, Circle, Polyline, Polygon, Multipoint, Elev
   // this takes the earth's curvature into account.
   ClientVS.prototype.geoPointToElevation = function(point, view, distance, resolution, sampler){
     let baseElevation = sampler.queryElevation(point);
-    // let baseElevation = view.basemapTerrain.getElevation(point);
-    // let realElevation = this.earthCurveOffset(resolution, distance, baseElevation);
-    // console.log(baseElevation)
     return baseElevation.z;
-    // return realElevation;
   }
 
   // does a look up in the already-built elevation raster
   ClientVS.prototype.pointToElevation = function(point,raster){
     let idx = this.pointToIndex(point, raster.pixelsWidth, raster.pixelsLength);
     return raster.elevationRaster[idx];
-    // let geoPoint = pointToGeoPoint(point,raster);
-    // return geoPointToElevation(geoPoint,raster.view);
   }
 
   // disrance formula for raster
@@ -376,38 +367,37 @@ function (Point, geoEngine, wmUtils, Circle, Polyline, Polygon, Multipoint, Elev
       octant7 = [],
       octant8 = [];
 
-      while (x >= y) {
-        octant1.push([center[0] + x, center[1] + y]);
-        octant2.push([center[0] + y, center[1] + x]);
-        octant3.push([center[0] - y, center[1] + x]);
-        octant4.push([center[0] - x, center[1] + y]);
-        octant5.push([center[0] - x, center[1] - y]);
-        octant6.push([center[0] - y, center[1] - x]);
-        octant7.push([center[0] + y, center[1] - x]);
-        octant8.push([center[0] + x, center[1] - y]);
+    while (x >= y) {
+      octant1.push([center[0] + x, center[1] + y]);
+      octant2.push([center[0] + y, center[1] + x]);
+      octant3.push([center[0] - y, center[1] + x]);
+      octant4.push([center[0] - x, center[1] + y]);
+      octant5.push([center[0] - x, center[1] - y]);
+      octant6.push([center[0] - y, center[1] - x]);
+      octant7.push([center[0] + y, center[1] - x]);
+      octant8.push([center[0] + x, center[1] - y]);
 
-        if (err <= 0) {
-            y += 1;
-            err += (2*y) + 1;
-        } else if (err > 0) { // else if makes this a "thick" circle.  no diagnal connections
-            x -= 1;
-            err -= (2*x) + 1;
-        }
+      if (err <= 0) {
+          y += 1;
+          err += (2*y) + 1;
+      } else if (err > 0) { // else if makes this a "thick" circle.  no diagnal connections
+          x -= 1;
+          err -= (2*x) + 1;
       }
-
-      octant1.shift();
-      octant2.reverse().shift();
-      octant3.shift();
-      octant4.reverse().shift();
-      octant5.shift();
-      octant6.reverse().shift();
-      octant7.shift();
-      octant8.reverse().shift();
-
-      return octant1.concat(octant2, octant3, octant4, octant5, octant6, octant7, octant8);
     }
 
-  // slope formula
+    octant1.shift();
+    octant2.reverse().shift();
+    octant3.shift();
+    octant4.reverse().shift();
+    octant5.shift();
+    octant6.reverse().shift();
+    octant7.shift();
+    octant8.reverse().shift();
+
+    return octant1.concat(octant2, octant3, octant4, octant5, octant6, octant7, octant8);
+  }
+
   ClientVS.prototype.slope = function(point1, point2, raster){
     let h1 = raster.centerElevation;
     let h2 = this.pointToElevation(point2,raster);
@@ -418,7 +408,6 @@ function (Point, geoEngine, wmUtils, Circle, Polyline, Polygon, Multipoint, Elev
   ClientVS.prototype.testLine = function(line,raster){
     let origin = line[0];
     let highestSlope = -Infinity;
-    // let lastWasTrue = true;
 
     return line.map(p => {
       if (p[0] === origin[0] && p[1] === origin[1]){
@@ -427,7 +416,6 @@ function (Point, geoEngine, wmUtils, Circle, Polyline, Polygon, Multipoint, Elev
           point: p
         }
       } else {
-        // add target height here
         let slopeRes = this.slope(origin, p, raster);
         if (slopeRes >= highestSlope){
           highestSlope = slopeRes;
@@ -490,8 +478,8 @@ function (Point, geoEngine, wmUtils, Circle, Polyline, Polygon, Multipoint, Elev
       parents.forEach(p => resultRings = resultRings.concat(this.getChildren(p, rings)));
       resultRings = resultRings.concat(rings.filter(ring => ring.parent === null && ring.children.length === 0));
       resultRings.forEach(ring => ring.points = this.ringToMap(ring.points,raster));
-      const res = resultRings.map(ring => ring.points);
-      resolve(res);
+      
+      resolve(resultRings.map(ring => ring.points));
     });
   }
 
@@ -500,7 +488,7 @@ function (Point, geoEngine, wmUtils, Circle, Polyline, Polygon, Multipoint, Elev
   }
 
 /**
-  * getChildren - simple BFS
+  * getChildren - BFS
   *
   * @param {ring} ring that has children
   * @param {rings} array of all rings
@@ -509,7 +497,7 @@ function (Point, geoEngine, wmUtils, Circle, Polyline, Polygon, Multipoint, Elev
   * assuming ring (1) has 3 children (2,3,4) and child 3 has 2 children (5,6)
   * this will return [ring 1, ring 2, ring 3, ring 5, ring 6, ring 4]
   *
-  * this is necessary because of unpolished polygon drawing rules in 3D the JS API 
+  * complex polygon rings need to be ordered this way to be drawn correctly 
   */
   ClientVS.prototype.getChildren = function(ring, rings){
     let retArray = [ring];
@@ -527,6 +515,7 @@ function (Point, geoEngine, wmUtils, Circle, Polyline, Polygon, Multipoint, Elev
     return retArray;
   }
 
+  // https://en.wikipedia.org/wiki/Even%E2%80%93odd_rule
   ClientVS.prototype.pointInPolygon = function(point, polygon) {
     const [x, y] = point;
     let ret = false;
@@ -625,10 +614,9 @@ function (Point, geoEngine, wmUtils, Circle, Polyline, Polygon, Multipoint, Elev
       }
     }  
 
-    // console.log( sign ? `${id} - no flip` : `${id} - flip`);
     return {
       id: id,
-      points: !sign ? ring.reverse() : ring,
+      points: !sign ? ring.reverse() : ring, // reverse rings that should be holes
       area: area,
       xMin: xMin,
       yAtXmin: yAtXmin, // used for even-odd check
