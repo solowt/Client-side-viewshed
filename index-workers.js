@@ -1,29 +1,22 @@
 require({
   packages: [
-      { name: "ClientVS", location: location.href.replace(/\/[^/]+$/, ''), main: 'ClientVS' }
-    ]
-},[
+    { name: "ClientVS", location: location.href.replace(/\/[^/]+$/, ''), main: 'ClientVS' }
+  ]
+}, [
   "esri/core/workers",
   "esri/Map",
   "esri/views/SceneView",
-  "esri/symbols/SimpleFillSymbol",
-  "esri/Color",
   "esri/Graphic",
-  "esri/geometry/Point",
   "esri/geometry/Polygon",
-  "esri/symbols/SimpleMarkerSymbol",
   "dojo/domReady!"
-], function( workers, Map, SceneView,
-    SimpleFillSymbol,
-    Color, Graphic,
-    Point, Polygon, SMS ) 
-{
-  let map = new Map({
+], function(workers, Map, SceneView, Graphic, Polygon) {
+
+  const map = new Map({
     basemap: "satellite",
     ground: "world-elevation"
   });
 
-  let view = new SceneView({
+  const view = new SceneView({
     container: "viewDiv",
     map: map,
     zoom: 15,
@@ -34,21 +27,25 @@ require({
     }
   });
 
+  let sampler;
+  view.watch("groundView.elevationSampler", value => sampler = value);
+
   clearbtn.addEventListener('click', e => view.graphics.removeAll());
 
-  let vsFill = new SimpleFillSymbol({
-    color: new Color([130, 242, 145, 0.5]),
-    outline: { // autocasts as new SimpleLineSymbol()
-      color: new Color([0, 0, 0]),
+  const vsFill = {
+    type: "simple-fill",
+    color: [130, 242, 145, 0.5],
+    outline: {
+      color: [0, 0, 0],
       width: 2
     }
-  });
+  };
 
-  let local = window.location.href.substring(0, window.location.href.lastIndexOf('/'));
-  let workerUrl = local + "/ClientVS.js";
+  const local = window.location.href.substring(0, window.location.href.lastIndexOf('/'));
+  const workerUrl = `${local}/ClientVS.js`;
   let workerConnection;
 
-  let workerPromise = workers.open(workerUrl, {
+  const workerPromise = workers.open(workerUrl, {
     strategy: "dedicated"
   });
 
@@ -57,12 +54,18 @@ require({
   })
   .catch(e => console.log(e));
 
+
   view.on('click', e => {
+    const p = e.mapPoint.clone();
+
+    const elevation = sampler ? sampler.queryElevation(e.mapPoint).z : 0;
+    p.z = elevation + parseInt(obsheight.value, 10);
 
     // add point symbol to show observer
     view.graphics.add(new Graphic({
-      geometry: e.mapPoint,
-      symbol: new SMS({
+      geometry: p,
+      symbol: {
+        type: "simple-marker",
         style: "circle",
         color: "blue",
         size: "10px",
@@ -70,27 +73,24 @@ require({
           color: [ 0, 0, 0 ],
           width: 3
         }
-      })
+      }
     }));
 
-
-    // resolves into a single polygon multiringed polygon
-    workerPromise.
-    then(() => {
+    workerPromise.then(() => {
       workerConnection.invoke("doClientVS", {
-        inputGeometry: e.mapPoint.toJSON(), // observer position
-        radius: parseInt(radius.value, 10), // radius in meters
-        pixelWidth: parseInt(resolution.value, 10), // resolution of viewshed in meters
-        observerHeight: parseInt(obsheight.value, 10) // height observer in meters
+        inputGeometry: e.mapPoint.toJSON(),            // observer position
+        radius: parseInt(radius.value, 10),            // radius in meters
+        pixelWidth: parseInt(resolution.value, 10),    // resolution of viewshed in meters
+        observerHeight: parseInt(obsheight.value, 10)  // height observer in meters
       })
       .then(polygon => {
-        // console.log(JSON.stringify(polygon.rings));
-        let g = new Graphic({
-          geometry: Polygon.fromJSON(polygon),
-          symbol: vsFill
-        });
 
-        view.graphics.add(g);
+        view.graphics.add(
+          new Graphic({
+            geometry: Polygon.fromJSON(polygon),
+            symbol: vsFill
+          })
+        );
       })
       .catch(e => console.log(e));
     });
