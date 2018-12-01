@@ -472,20 +472,23 @@ function (Point, geoEngine, wmUtils, Circle, Polyline, Polygon, Multipoint, Elev
         let newRing = this.findRing(currentPoint, raster, rings.length);
         this.flipRing(newRing, raster);
         if (newRing.area > smallestArea){
-          // newRing.points = this.ringToMap(newRing.points,raster)
+          for (let i = rings.length - 1; i >= 0; i--) {
+            const ring = rings[i];
+            let inside = this.pointInPolygon([newRing.xMin, newRing.yAtXmin], ring.points);
+            if (inside) {
+              ring.children.push(newRing.id);
+              newRing.parent = ring.id;
+              break;
+            }
+          }
           rings.push(newRing);
         }
       }
-      const now = Date.now();
-
-      // re do
-      this.evenOddCheck(rings);
 
       const parents = rings.filter(ring => ring.parent === null && ring.children.length > 0);
       let resultRings = [];
       parents.forEach(p => resultRings = resultRings.concat(this.getChildren(p, rings)));
       resultRings = resultRings.concat(rings.filter(ring => ring.parent === null && ring.children.length === 0));
-      console.log(resultRings[43])
       resultRings.forEach(ring => ring.points = this.ringToMap(ring.points,raster));
       const res = resultRings.map(ring => ring.points);
       resolve(res);
@@ -536,64 +539,6 @@ function (Point, geoEngine, wmUtils, Circle, Polyline, Polygon, Multipoint, Elev
       j = i;
     }
     return ret;
-  }
-
-/** 
-  * evenOddCheck - simple implementation of the even-odd rule: https://en.wikipedia.org/wiki/Even%E2%80%93odd_rule
-  *
-  * the basic idea is that if you draw a line starting at the edge of each ring in any direction
-  * the number of times it crosses other rings tells us whether the polygon should be a hole or a 
-  * fill.  if it crosses an even number of times, it's filled, odd number, a hole
-  *
-  * this method also attaches parent and child arrays to each ring
-  * 
-  * @param {rings} - all rings
-  * @param {raster} - all data
-  */
-  ClientVS.prototype.evenOddCheck = function(rings){
-    rings.forEach((ring, idx) => {
-      // map ring ids to # of interections on this ring
-      let intersectionsMap = [];
-      
-      // start at the x min on each ring and decrement until it hits 0
-      let x = ring.xMax - ring.xMin;
-      let y = ring.yAtXmin;
-      
-      for (let j = 0; j < rings.length; j++) {
-        if (j !== ring.id && // first condition: we don't care about this ring intersecting itself
-            (x >= rings[j].xMin && // second condition: this is a test to make sure that the point is inside
-            x <= rings[j].xMax &&  // the bounding box of the ring being checked.  if it is not inside, there 
-            y >= rings[j].yMin &&  // cannot be an intersection so we don't need to test it.  this saves us some testing
-            y <= rings[j].yMax)) {
-          const points = rings[j].points;
-          const inside = this.pointInPolygon([x, y], points);
-          if (inside) {
-            const index = intersectionsMap.findIndex(r => r.id === rings[j].id);
-            if (index !== -1){
-              intersectionsMap[index].intersections += 1;
-            } else {
-              intersectionsMap.push({id:rings[j].id, intersections: 1});
-            }
-          }
-        }
-      }
-
-      // if total intersections is not even, reverse ring so it will be ccw 
-      // if (intersections % 2 !== 0){
-      //   ring.points.reverse();
-      // }
-
-      // map of ring id (idx) to bool: does that ring contain this ring?
-      // we need this to determine ring order.  if the ring being checked is
-      // contained by each ring, push this ring's id (idx) onto that ring's children array
-      for (let m = 0; m < intersectionsMap.length; m++){
-        if (intersectionsMap[m].intersections % 2 !== 0){
-          ring.parent = intersectionsMap[m].id;
-          rings[intersectionsMap[m].id].children.push(ring.id);
-          break;
-        }
-      }
-    });
   }
 
   // translate rings of [x,y] (raster) into rings of [lng,lat] (map)

@@ -58,9 +58,6 @@ require({
   .catch(e => console.log(e));
 
   view.on('click', e => {
-    // console.log(e.mapPoint);
-    e.mapPoint.x = -11271764.030568797;
-    e.mapPoint.y = 2486890.3095428017
 
     // add point symbol to show observer
     view.graphics.add(new Graphic({
